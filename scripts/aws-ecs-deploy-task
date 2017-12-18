@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+set -e
+
+export AWS_REGION=${AWS_REGION:-$AWS_DEFAULT_REGION}
+
+: "${AWS_REGION:?Need to set AWS_REGION or AWS_DEFAULT_REGION}"
+: "${AWS_ACCESS_KEY_ID:?Need to set AWS_ACCESS_KEY_ID}"
+: "${AWS_SECRET_ACCESS_KEY:?Need to set AWS_SECRET_ACCESS_KEY}"
+
+if (( $# != 2 )); then
+  echo "usage: $(basename $0) task_name image"
+  echo "  updates task definition with new image"
+  exit 1
+fi
+
+task=$1
+image=$2
+
+# get the latest taskdef instead of deployed one
+latest_defn_arn=$(
+  aws ecs list-task-definitions --family-prefix $task --sort DESC \
+    | jq -r '.taskDefinitionArns[0]'
+)
+
+echo "Latest task definition: $latest_defn_arn"
+
+# Get a JSON representation of the task definition
+defn_json=$(aws ecs describe-task-definition --task-def $latest_defn_arn)
+
+new_defn_json=$(
+  echo $defn_json \
+    | sed -e "s|\"image\": \"[^\"]*\"|\"image\": \"${image}\"|" \
+    | jq '.taskDefinition|{family: .family, volumes: .volumes, containerDefinitions: .containerDefinitions}'
+)
+
+# Register the new task definition, and store its ARN
+new_taskdef=$(
+  aws ecs register-task-definition --cli-input-json "$new_defn_json" \
+    | jq -r .taskDefinition.taskDefinitionArn
+)
+
+echo "Updated task=$task to $new_taskdef with image $image"

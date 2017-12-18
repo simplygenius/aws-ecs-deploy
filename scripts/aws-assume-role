@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+set -e
+
+export AWS_REGION=${AWS_REGION:-$AWS_DEFAULT_REGION}
+
+: "${AWS_REGION:?Need to set AWS_REGION or AWS_DEFAULT_REGION}"
+: "${AWS_ACCESS_KEY_ID:?Need to set AWS_ACCESS_KEY_ID}"
+: "${AWS_SECRET_ACCESS_KEY:?Need to set AWS_SECRET_ACCESS_KEY}"
+
+if (( $# < 2 )); then
+  echo "usage: $(basename $0) account role aws_cmd" 1>&2
+  echo "  runs the command under the assumed role, e.g." 1>&2
+  echo "    assume_role 1234 mydeployerrole aws s3 ls" 1>&2
+  echo "  with no arguments, supplies the assumer environment vars" 1>&2
+  echo "  suitable for eval, e.g." 1>&2
+  echo "    eval \$($(basename $0) 1234 mydeployerrole)" 1>&2
+  exit 1
+fi
+
+account=$1; shift
+role_name=$1; shift
+
+role="arn:aws:iam::${account}:role/${role_name}"
+echo "Using STS to get credentials for ${role}" 1>&2
+
+aws_tmp=$(mktemp -t aws-json-XXXXXX)
+
+aws sts assume-role --role-arn "${role}" --role-session-name aws_docker_creds > "${aws_tmp}"
+
+export AWS_ACCESS_KEY_ID=$(cat ${aws_tmp} | jq -r ".Credentials.AccessKeyId")
+export AWS_SECRET_ACCESS_KEY=$(cat ${aws_tmp} | jq -r ".Credentials.SecretAccessKey")
+export AWS_SESSION_TOKEN=$(cat ${aws_tmp} | jq -r ".Credentials.SessionToken")
+export AWS_SESSION_EXPIRATION=$(cat ${aws_tmp} | jq -r ".Credentials.Expiration")
+
+if [[ $# > 0 ]]; then
+  "$@"
+else
+  echo export AWS_ACCESS_KEY_ID=\"$AWS_ACCESS_KEY_ID\"
+  echo export AWS_SECRET_ACCESS_KEY=\"$AWS_SECRET_ACCESS_KEY\"
+  echo export AWS_SESSION_TOKEN=\"$AWS_SESSION_TOKEN\"
+  echo export AWS_SESSION_EXPIRATION=\"$AWS_SESSION_EXPIRATION\"
+fi

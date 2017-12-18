@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+set -e
+
+export AWS_REGION=${AWS_REGION:-$AWS_DEFAULT_REGION}
+
+: "${AWS_REGION:?Need to set AWS_REGION or AWS_DEFAULT_REGION}"
+: "${AWS_ACCESS_KEY_ID:?Need to set AWS_ACCESS_KEY_ID}"
+: "${AWS_SECRET_ACCESS_KEY:?Need to set AWS_SECRET_ACCESS_KEY}"
+
+if (( $# < 1 )); then
+  echo "usage: $(basename $0) repo_name [image_keep_count=50]"
+  echo "  updates service with new image"
+  exit 1
+fi
+
+repo_name=$1
+image_keep_count=${2:-50}
+
+# Get list of images, assuming sortable by tag (i.e. a date prefix), so we sort
+# and output all *but* last 50, that is, if only 40, nothing gets output.  The
+# latest tag sorts to the end, so safe from deletion because we +1 the
+# keep_count. We ignore images without a tag as they could be dependent layers (?)
+keep_idx=$(($image_keep_count + 1))
+old_images=$(
+  aws ecr list-images --repository-name "${repo_name}" | \
+    jq -r "[.imageIds[] | select(.imageTag != null)] | sort_by(.imageTag) | map(\"imageDigest=\" + .imageDigest)[0:-$keep_idx] | join(\" \")"
+)
+
+if [[ -n $old_images ]]; then
+  echo "Cleaning $(echo $old_images | wc -w) old images"
+  aws ecr batch-delete-image \
+    --repository-name "${repo_name}" \
+    --image-ids $old_images
+else
+  echo "No images to clean (less than $image_keep_count images)"
+fi

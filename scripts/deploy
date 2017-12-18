@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+# fail fast
+set -e
+
+function usage {
+  echo "usage: $(basename $0) [options] service"
+  echo
+  echo "  For example: $(basename $0) -a 1234567890 -c main api"
+  echo
+  echo "  Options:"
+  echo
+  echo "    -a account      aws account to deploy the app to (required)"
+  echo "    -c cluster      ecs cluster to deploy the app to (required)"
+  echo "    -r repo_name    name of the ecr repo for the app image (default=service)"
+  echo "    -v version      version string to add to image tag (default=timestamp)"
+  echo "    -d deployer     deployer role to assume in aws_account (default=deployer)"
+  echo
+  exit 1
+}
+
+typeset -i query=0
+
+while getopts ":c:r:a:v:d:" opt; do
+  case $opt in
+    a)
+      aws_account="$OPTARG"
+      ;;
+    c)
+      ecs_cluster="$OPTARG"
+      ;;
+    r)
+      ecr_repo="$OPTARG"
+      ;;
+    v)
+      version_hash="$OPTARG"
+      ;;
+    d)
+      deployer_role="$OPTARG"
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      usage
+      ;;
+  esac
+done
+shift $((OPTIND-1))
+
+if (( $# != 1 )); then
+  usage
+fi
+ecs_service=$1; shift
+
+if [[ -z $ecs_cluster || -z $aws_account ]]; then
+  usage
+fi
+
+ecr_repo=${ecr_repo:-$ecs_service}
+deployer_role=${deployer_role:-deployer}
+revision=$(date +%Y%m%d%H%M%S)
+if [[ -n $version_hash ]]; then
+  revision="${revision}-${version_hash}"
+fi
+
+export AWS_REGION=${AWS_REGION:-$AWS_DEFAULT_REGION}
+: "${AWS_REGION:?Need to set AWS_REGION or AWS_DEFAULT_REGION}"
+: "${AWS_ACCESS_KEY_ID:?Need to set AWS_ACCESS_KEY_ID}"
+: "${AWS_SECRET_ACCESS_KEY:?Need to set AWS_SECRET_ACCESS_KEY}"
+unset AWS_DEFAULT_PROFILE
+
+echo "Performing deploy"
+
+image=$ecs_service:latest
+
+# Build docker image
+docker build -t $image .
+
+ecr_registry_host=${aws_account}.dkr.ecr.${AWS_REGION}.amazonaws.com
+ecs_image=${ecr_registry_host}/${ecr_repo}
+
+(
+  # Set AWS credential env vars to be those of the ops-deployer role for the current account
+  # This uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY from the secure env, and sets new ones
+  # for the other account we are working against (dev/prod)
+  eval $(aws-assume-role $aws_account $deployer_role)
+
+  # docker login into the ECR repo for the current account so that we can pull/push to it
+  eval $(aws ecr get-login --no-include-email)
+
+  docker tag $image $ecs_image:latest
+  docker tag $image $ecs_image:${revision}
+  docker push $ecs_image:latest
+  docker push $ecs_image:${revision}
+
+  # Trigger ECS deploy against the image pushed above
+  aws-ecs-deploy ${ecs_cluster} ${ecs_service} $ecs_image:${revision}
+
+  # Clean up old images
+  aws-ecr-clean ${ecr_repo} 200
+)
