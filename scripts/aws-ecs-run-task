@@ -8,14 +8,22 @@ export AWS_REGION=${AWS_REGION:-$AWS_DEFAULT_REGION}
 : "${AWS_ACCESS_KEY_ID:?Need to set AWS_ACCESS_KEY_ID}"
 : "${AWS_SECRET_ACCESS_KEY:?Need to set AWS_SECRET_ACCESS_KEY}"
 
-if (( $# != 2 )); then
-  echo "usage: $(basename $0) cluster_name task_name[:revision]"
+if (( $# < 2 )); then
+  echo "usage: $(basename $0) cluster_name task_name[:revision] [command override]"
   echo "  runs the task in the cluster"
   exit 1
 fi
 
 cluster=$1
 task=$2
+command=$3
 
-echo "Running task $task on cluster $cluster"
-aws ecs run-task --cluster $cluster --task-definition $task
+msg="Running task $task on cluster $cluster"
+cmd="aws ecs run-task --cluster $cluster --task-definition $task"
+if [[ -n $command ]]; then
+  msg="$msg with command: $command"
+  cmd="$cmd --overrides '{\"containerOverrides\": [{\"command\": [\"$command\"]}]}'"
+fi
+
+echo $msg
+$cmd
