@@ -28,15 +28,14 @@ env:
     - secure: "xxx"
 
     - SERVICE_NAME=<your ecs app name>
+    - ENV=dev
     - AWS_ACCOUNT=1234567890
     - AWS_REGION=us-east-1
     - ECS_CLUSTER=main
     - NAME_PREFIX=
-    - ENV=dev
     
-`   - AWS_ENV=$(env | grep "^AWS" | awk -F= '{print "-e " $1}')
     - MOUNTS="-v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/app"
-    - DOCKER_OPTS="$AWS_ENV $MOUNTS"
+    - DOCKER_OPTS="-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION $MOUNTS"
 
 install: true
 
@@ -45,6 +44,7 @@ bash -x /usr/local/bin/deploy -a 500651484941 -c dev-botchain-ecs-main -d dev-de
   - docker run $DOCKER_OPTS simplygenius/aws-ecs-deploy deploy \
     -a $AWS_ACCOUNT \
     -c $NAME_PREFIX$ECS_CLUSTER \
-    -d $ENV-deployer
+    -d $ENV-deployer \
+    -v ${TRAVIS_COMMIT::7} \
     $NAME_PREFIX$SERVICE_NAME 
 ```
