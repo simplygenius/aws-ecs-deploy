@@ -4,7 +4,7 @@
 set -e
 
 function usage {
-  echo "usage: $(basename $0) [options] service"
+  echo "usage: $(basename $0) [options] name"
   echo
   echo "  For example: $(basename $0) -a 1234567890 -c main api"
   echo
@@ -12,16 +12,16 @@ function usage {
   echo
   echo "    -a account      aws account to deploy the app to (required)"
   echo "    -c cluster      ecs cluster to deploy the app to (required)"
-  echo "    -r repo_name    name of the ecr repo for the app image (default=service)"
+  echo "    -r repo_name    name of the ecr repo for the app image (default=name)"
   echo "    -v version      version string to add to image tag (default=timestamp)"
   echo "    -d deployer     deployer role to assume in aws_account (default=deployer)"
   echo
   exit 1
 }
 
-typeset -i query=0
+typeset -i is_task=0
 
-while getopts ":c:r:a:v:d:" opt; do
+while getopts ":c:r:a:v:d:t" opt; do
   case $opt in
     a)
       aws_account="$OPTARG"
@@ -38,6 +38,9 @@ while getopts ":c:r:a:v:d:" opt; do
     d)
       deployer_role="$OPTARG"
       ;;
+    t)
+      is_task=1
+      ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
       usage
@@ -49,13 +52,13 @@ shift $((OPTIND-1))
 if (( $# != 1 )); then
   usage
 fi
-ecs_service=$1; shift
+ecs_name=$1; shift
 
 if [[ -z $ecs_cluster || -z $aws_account ]]; then
   usage
 fi
 
-ecr_repo=${ecr_repo:-$ecs_service}
+ecr_repo=${ecr_repo:-$ecs_name}
 deployer_role=${deployer_role:-deployer}
 revision=$(date +%Y%m%d%H%M%S)
 if [[ -n $version_hash ]]; then
@@ -70,7 +73,7 @@ unset AWS_DEFAULT_PROFILE
 
 echo "Performing deploy"
 
-image=$ecs_service:latest
+image=$ecs_name:latest
 
 # Build docker image
 docker build -t $image .
@@ -92,8 +95,13 @@ ecs_image=${ecr_registry_host}/${ecr_repo}
   docker push $ecs_image:latest
   docker push $ecs_image:${revision}
 
-  # Trigger ECS deploy against the image pushed above
-  aws-ecs-deploy ${ecs_cluster} ${ecs_service} $ecs_image:${revision}
+  if (($is_task)); then
+    # Trigger ECS task deploy against the image pushed above
+    aws-ecs-deploy-task ${ecs_name} $ecs_image:${revision}
+  else
+    # Trigger ECS deploy against the image pushed above
+    aws-ecs-deploy ${ecs_cluster} ${ecs_name} $ecs_image:${revision}
+  fi
 
   # Clean up old images
   aws-ecr-clean ${ecr_repo} 200
