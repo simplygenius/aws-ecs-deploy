@@ -31,7 +31,7 @@ defn_json=$(aws ecs describe-task-definition --task-def $latest_defn_arn)
 new_defn_json=$(
   echo $defn_json \
     | sed -e "s|\"image\": \"[^\"]*\"|\"image\": \"${image}\"|" \
-    | jq '.taskDefinition|{family: .family, volumes: .volumes, containerDefinitions: .containerDefinitions}'
+    | jq '.taskDefinition|{family: .family, taskRoleArn: .taskRoleArn, volumes: .volumes, containerDefinitions: .containerDefinitions}'
 )
 
 # Register the new task definition, and store its ARN
