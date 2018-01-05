@@ -14,15 +14,28 @@ if (( $# < 2 )); then
   exit 1
 fi
 
-cluster=$1
-task=$2
-command=$3
+cluster=$1; shift
+task=$1; shift
+commandArray=( "$@" )
 
 msg="Running task $task on cluster $cluster"
 cmd="aws ecs run-task --cluster $cluster --task-definition $task"
-if [[ -n $command ]]; then
-  msg="$msg with command: $command"
-  cmd="$cmd --overrides '{\"containerOverrides\": [{\"command\": [\"$command\"]}]}'"
+
+if (( ${#commandArray[@]} > 0 )); then
+  json_file=$(mktemp -t overrides-XXXX.json)
+  cat << EOF > $json_file
+{
+  "containerOverrides": [
+    {
+      "name": "$task",
+      "command": $(printf '%s\n' "${commandArray[@]}" | jq -R . | jq -s .)
+    }
+  ]
+}
+EOF
+
+  msg="$msg with command: ${commandArray[@]}"
+  cmd="$cmd --overrides file://$json_file"
 fi
 
 echo $msg
