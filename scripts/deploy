@@ -15,13 +15,15 @@ function usage {
   echo "    -r repo_name    name of the ecr repo for the app image (default=name)"
   echo "    -v version      version string to add to image tag (default=timestamp)"
   echo "    -d deployer     deployer role to assume in aws_account (default=deployer)"
+  echo "    -t              deploy as a task (not service)"
+  echo "    -p              populate docker build cache"
   echo
   exit 1
 }
 
-typeset -i is_task=0
+typeset -i is_task=0 populate_build_cache=0
 
-while getopts ":c:r:a:v:d:t" opt; do
+while getopts ":c:r:a:v:d:tp" opt; do
   case $opt in
     a)
       aws_account="$OPTARG"
@@ -40,6 +42,9 @@ while getopts ":c:r:a:v:d:t" opt; do
       ;;
     t)
       is_task=1
+      ;;
+    p)
+      populate_build_cache=1
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -75,9 +80,6 @@ echo "Performing deploy"
 
 image=$ecs_name:latest
 
-# Build docker image
-docker build -t $image .
-
 ecr_registry_host=${aws_account}.dkr.ecr.${AWS_REGION}.amazonaws.com
 ecs_image=${ecr_registry_host}/${ecr_repo}
 
@@ -89,6 +91,18 @@ ecs_image=${ecr_registry_host}/${ecr_repo}
 
   # docker login into the ECR repo for the current account so that we can pull/push to it
   eval $(aws ecr get-login --no-include-email)
+
+  # Build docker image
+  maybe_cache_from=""
+  if ((populate_build_cache)); then
+      # Pull base image as a workaround for
+      # https://github.com/moby/moby/issues/31613#issuecomment-342857930
+      docker pull $(grep -i "^FROM" Dockerfile | awk '{print $2}')
+
+      docker pull $ecs_image:latest
+      maybe_cache_from="--cache-from $ecs_image:latest"
+  fi
+  docker build $maybe_cache_from -t $image .
 
   docker tag $image $ecs_image:latest
   docker tag $image $ecs_image:${revision}
