@@ -99,7 +99,7 @@ ecs_image=${ecr_registry_host}/${ecr_repo}
       # https://github.com/moby/moby/issues/31613#issuecomment-342857930
       docker pull $(grep -i "^FROM" Dockerfile | awk '{print $2}')
 
-      docker pull $ecs_image:latest
+      docker pull $ecs_image:latest || true
       maybe_cache_from="--cache-from $ecs_image:latest"
   fi
   docker build $maybe_cache_from -t $image .
